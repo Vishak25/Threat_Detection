@@ -1,0 +1,37 @@
+# Data
+data/
+features/
+cache/
+*.zip
+*.tar.gz
+data.zip
+
+# Model Artifacts
+checkpoints/
+*.h5
+*.weights.h5
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+pip-log.txt
+pip-delete-this-directory.txt
+
+# System
+.DS_Store
+.postman_history.json
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Logs
+logs/
+*.log
