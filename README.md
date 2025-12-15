@@ -8,7 +8,7 @@ A deep learning system for detecting anomalies (Fighting, Arrest) in surveillanc
 
 ## Quick Links
 
-- **[Full Report (REPORT.md)](REPORT.md)** - Comprehensive documentation with methodology, experiments, and results
+- **[Full Report (REPORT.md)](https://github.com/Vishak25/camera_anomaly_detection/blob/main/report.md)** - Comprehensive documentation with methodology, experiments, and results
 - **[Figures Directory](figures/)** - All generated visualizations
 
 ## Key Results
