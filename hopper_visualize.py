@@ -8,12 +8,12 @@ import random
 from config import config
 from model import MILScoringHead
 
-# Setup
 sys.path.append(os.getcwd())
 config.BATCH_SIZE = 1
 
-# --- Label Loader (Copied from hopper_train.py) ---
+
 def load_ground_truth():
+    """Load ground truth labels from CSV files."""
     label_dir = Path.home() / "surveillance/camera_anomaly_detection_v2/data/DCSASS Dataset/Labels"
     if not label_dir.exists():
         local_fallback = Path("data/DCSASS Dataset/Labels")
@@ -34,18 +34,18 @@ def load_ground_truth():
             print(f"Error reading {csv_path}: {e}")
     return video_to_label
 
+
 GROUND_TRUTH = load_ground_truth()
 
-# --- Feature Loader (Copied from hopper_train.py) ---
+
 def make_feature_dataset(feature_dir, split="train", val_split=0.2, seed=1337):
+    """Create a TensorFlow dataset from feature files."""
     feature_dir = Path(feature_dir)
     files = sorted(list(feature_dir.rglob("*.npy")))
     
-    # Shuffle
     random.seed(seed)
     random.shuffle(files)
     
-    # Split
     split_idx = int(len(files) * (1 - val_split))
     if split == "train":
         files = files[:split_idx]
@@ -58,7 +58,6 @@ def make_feature_dataset(feature_dir, split="train", val_split=0.2, seed=1337):
         for f in files:
             try:
                 feats = np.load(f)
-                # Get Label from CSV
                 label = GROUND_TRUTH.get(f.stem, 1)
                 yield feats, np.int32(label), str(f.name)
             except Exception as e:
@@ -75,7 +74,7 @@ def make_feature_dataset(feature_dir, split="train", val_split=0.2, seed=1337):
     ds = ds.batch(1).prefetch(tf.data.AUTOTUNE)
     return ds
 
-# --- Load Data ---
+
 SCRATCH_DIR = Path("/scratch/vnandak/features")
 HOME_DIR = Path("features")
 
@@ -92,7 +91,6 @@ else:
 print("Loading validation dataset...")
 val_ds = make_feature_dataset(FEATURES_DIR, split="val")
 
-# --- Load Model ---
 print("Loading MIL Scoring Head...")
 mil_head = MILScoringHead()
 mil_head.build((None, 2048))
@@ -116,17 +114,14 @@ else:
     print("No checkpoints found!")
     sys.exit(1)
 
-# --- Visualize ---
 print("\n--- Visualizing Predictions ---")
 print(f"{'Video ID':<30} | {'Max Score':<10} | {'Avg Score':<10} | {'Pred':<5} | {'Label':<5}")
 print("-" * 70)
 
 for i, (bag, label, vid_id_tensor) in enumerate(val_ds.take(20)):
     vid_id = vid_id_tensor.numpy()[0].decode('utf-8')
-    instances = bag[0] # (N, 2048)
+    instances = bag[0]
     
-    # Predict
-    # Cast to float32
     instances = tf.cast(instances, tf.float32)
     scores = mil_head(instances, training=False)
     scores = scores.numpy().flatten()
@@ -142,4 +137,3 @@ for i, (bag, label, vid_id_tensor) in enumerate(val_ds.take(20)):
         print(f"  Scores (First 10): {scores[:10]}")
         print(f"  Scores (Max Index): {np.argmax(scores)} (Val: {max_score:.4f})")
         print("-" * 70)
-

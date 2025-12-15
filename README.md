@@ -1,83 +1,101 @@
-# Camera Anomaly Detection V2 - Hopper Deployment
+# Video Anomaly Detection using Weakly Supervised MIL
 
-This guide explains how to deploy and run the project on the GMU Hopper cluster.
+[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
+[![TensorFlow 2.16](https://img.shields.io/badge/tensorflow-2.16-orange.svg)](https://www.tensorflow.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-## Prerequisites
-- **Local Machine**: macOS/Linux with `scp` and `rsync`.
-- **Remote Machine**: GMU Hopper (`hopper.orc.gmu.edu`).
-- **Data**: DCSASS Dataset (or subset).
+A deep learning system for detecting anomalies (Fighting, Arrest) in surveillance videos using **Multiple Instance Learning (MIL)** with weak supervision.
 
-## 1. Sync Code to Hopper
-**Run these commands in your LOCAL Terminal (macOS):**
+## Quick Links
 
-```bash
-# 1. Navigate to project directory
-cd /Users/vishaknandakumar/Documents/camera_anomaly_detection_v2
+- **[Full Report (REPORT.md)](REPORT.md)** - Comprehensive documentation with methodology, experiments, and results
+- **[Figures Directory](figures/)** - All generated visualizations
 
-# 2. Sync code (excluding data)
-# Note: We use rsync because macOS scp doesn't support --exclude
-rsync -av --exclude='data' --exclude='data.zip' --exclude='.git' --exclude='.venv' --exclude='__pycache__' ./ vnandak@hopper.orc.gmu.edu:~/surveillance/camera_anomaly_detection_v2/
+## Key Results
 
-# 3. Sync subset data (if needed)
-# If you created a subset zip locally:
-scp subset_data.zip vnandak@hopper.orc.gmu.edu:~/surveillance/camera_anomaly_detection_v2/
+| Metric | Value |
+|:-------|:------|
+| Validation Accuracy | **74.31%** |
+| Training Loss | **0.134** |
+| Model Status | Stable (No mode collapse) |
+
+## Architecture
+
+```
+Video → ResNet50V2 (Frozen) → MIL Scoring Head → Anomaly Score [0-1]
+        (ImageNet)            (Trainable)
 ```
 
-## 2. Setup Environment on Hopper
-**Run these commands in your SSH Terminal (Hopper):**
+![Architecture](figures/fig2_architecture.png)
 
-```bash
-# 1. Connect to Hopper
-ssh vnandak@hopper.orc.gmu.edu
+## Project Structure
 
-# 2. Go to project directory
-cd ~/surveillance/camera_anomaly_detection_v2
-
-# 3. Unzip data (if using subset)
-unzip -o subset_data.zip
-
-# 4. Run Setup Script (Installs dependencies)
-bash hopper_setup.sh
+```
+camera_anomaly_detection/
+├── config.py              # Hyperparameters
+├── model.py               # MIL Scoring Head
+├── dcsass_loader.py       # Data loading
+├── extract_features.py    # Feature extraction
+├── train.py               # Training script
+├── realtime_inference.py  # Real-time detection
+├── generate_figures.py    # Report figures
+├── REPORT.md              # Full project report
+├── figures/               # Generated visualizations
+└── requirements.txt       # Dependencies
 ```
 
-## 3. Run Training
-**Run these commands in your SSH Terminal (Hopper):**
-
-**CRITICAL**: You must export the library paths before running python, otherwise TensorFlow won't find the GPU.
+## Installation
 
 ```bash
-# 1. Load Modules
-module load cuda/12.6.3
-module load cudnn/9.6.0.74-12.6.3
-
-# 2. Export Library Path (Critical for GPU)
-export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$(python3 -c "import nvidia.cudnn; print(nvidia.cudnn.__path__[0])")/lib:$(python3 -c "import nvidia.cublas; print(nvidia.cublas.__path__[0])")/lib:$(python3 -c "import nvidia.cufft; print(nvidia.cufft.__path__[0])")/lib:$(python3 -c "import nvidia.cusparse; print(nvidia.cusparse.__path__[0])")/lib:$(python3 -c "import nvidia.cusolver; print(nvidia.cusolver.__path__[0])")/lib:$(python3 -c "import nvidia.curand; print(nvidia.curand.__path__[0])")/lib
-
-# 3. Run Visualization
-python3 hopper_visualize.py
-
-# 4. Run Training Script
-python3 hopper_train.py
+git clone <repository>
+cd camera_anomaly_detection
+pip install -r requirements.txt
 ```
 
-## Environment Reference (Golden Configuration)
-These are the exact versions that are confirmed to work on Hopper:
+## Usage
 
-*   **Cluster Modules**:
-    *   `cuda/12.6.3`
-    *   `cudnn/9.6.0.74-12.6.3`
-*   **Python Packages**:
-    *   `tensorflow==2.16.1`
-    *   `numpy<2.0.0` (Pinned to avoid conflict)
-    *   `scipy<1.12` (Pinned to avoid conflict)
-*   **GPU Libraries**:
-    *   We use the **pip-installed** NVIDIA libraries (e.g., `nvidia-cudnn-cu12==8.9.7`) by exporting `LD_LIBRARY_PATH`. This is more reliable than system modules for TF 2.16.
+### 1. Feature Extraction
 
-## Troubleshooting
-- **"Killed"**: This means the process ran out of System RAM (not GPU memory).
-    - **Fix**: The script `hopper_train.py` now has `max_frames=1000` to prevent loading huge videos. Ensure you synced the latest version.
-- **"Cannot dlopen some GPU libraries"**: You forgot to run the `export LD_LIBRARY_PATH...` command above.
+```bash
+python extract_features.py
+```
 
+### 2. Training
 
+```bash
+python train.py
+```
 
+### 3. Real-Time Inference
 
+```bash
+python realtime_inference.py \
+    --video surveillance.mp4 \
+    --weights checkpoints/model_epoch_20.weights.h5 \
+    --threshold 0.4
+```
+
+## Training Curves
+
+![Training](figures/fig4_training_curves.png)
+
+## Requirements
+
+- Python 3.8+
+- TensorFlow 2.16+
+- OpenCV
+- NumPy < 2.0.0
+- SciPy < 1.12
+
+## Citation
+
+```bibtex
+@inproceedings{sultani2018real,
+  title={Real-world anomaly detection in surveillance videos},
+  author={Sultani, Waqas and Chen, Chen and Shah, Mubarak},
+  booktitle={CVPR},
+  year={2018}
+}
+```
+
+**Author:** Vishak Nandakumar (G01494598) and Baalavignesh Arunachalam (G01486574)

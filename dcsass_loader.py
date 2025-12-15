@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import argparse
-import csv
 import hashlib
 import os
 import shutil
@@ -15,7 +13,6 @@ import tensorflow as tf
 from sklearn.model_selection import StratifiedShuffleSplit
 from tqdm.auto import tqdm
 
-# Try to import imageio_ffmpeg, but handle if missing
 try:
     import imageio_ffmpeg
 except ImportError:
@@ -23,12 +20,10 @@ except ImportError:
 
 from config import config
 
-# --- Logging Setup ---
 import logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 LOGGER = logging.getLogger(__name__)
 
-# --- Constants ---
 VIDEO_EXTS: Tuple[str, ...] = (".mp4", ".avi", ".mov", ".mkv")
 SPLIT_NAMES = ("train", "val", "test")
 _CACHE_VERSION = "frames_v1"
@@ -37,7 +32,6 @@ METADATA_PATH_CANDIDATES = ("path", "video", "filepath", "file", "relative_path"
 METADATA_LABEL_CANDIDATES = ("label", "class", "category", "target", "y")
 METADATA_SPLIT_CANDIDATES = ("split", "partition", "set")
 
-# --- Video Decoding Utils (Inlined from transforms.py) ---
 
 def _ensure_ffmpeg_binary() -> None:
     """Set IMAGEIO_FFMPEG_EXE to a usable binary."""
@@ -66,8 +60,10 @@ def _ensure_ffmpeg_binary() -> None:
     except Exception as exc:
         LOGGER.warning("Unable to download bundled ffmpeg: %s", exc)
 
+
 _ensure_ffmpeg_binary()
 os.environ.setdefault("OPENCV_OPENCL_RUNTIME", "disabled")
+
 
 def decode_video_opencv(
     path: str,
@@ -97,6 +93,7 @@ def decode_video_opencv(
         raise RuntimeError(f"No frames decoded from {path}")
     return frames
 
+
 def make_segments(frames: Sequence[np.ndarray] | np.ndarray, T: int, stride: int) -> np.ndarray:
     """Create sliding-window segments of length T."""
     if isinstance(frames, np.ndarray):
@@ -115,28 +112,32 @@ def make_segments(frames: Sequence[np.ndarray] | np.ndarray, T: int, stride: int
         return np.empty((0, T) + arr.shape[1:], dtype=arr.dtype)
     return np.stack(windows)
 
-# --- Path Utils ---
 
 def list_videos(root: Path, exts: Sequence[str] = VIDEO_EXTS) -> List[Path]:
+    """List all video files in a directory."""
     files = [p for p in root.rglob("*") if p.suffix.lower() in exts and p.is_file()]
     files.sort()
     return files
 
+
 def resolve_dcsass_root(explicit_root: Optional[str | Path]) -> Path:
+    """Resolve the DCSASS dataset root directory."""
     if explicit_root:
         return Path(explicit_root).resolve()
     return config.DATA_DIR.resolve()
 
-# --- Metadata Utils ---
 
 def _read_metadata_csv(metadata_path: Path):
+    """Read metadata CSV file."""
     import pandas as pd
     df = pd.read_csv(metadata_path)
     if df.empty:
         raise ValueError(f"Metadata file {metadata_path} is empty.")
     return df
 
+
 def _detect_column(df, candidates: Sequence[str]) -> Optional[str]:
+    """Detect column name from candidates."""
     lower_map = {col.lower(): col for col in df.columns}
     for candidate in candidates:
         match = lower_map.get(candidate.lower())
@@ -144,7 +145,9 @@ def _detect_column(df, candidates: Sequence[str]) -> Optional[str]:
             return match
     return None
 
+
 def _normalize_video_path(root: Path, raw_path: str) -> Path:
+    """Normalize video path to absolute path."""
     path = Path(raw_path)
     if path.is_absolute() and path.exists():
         return path
@@ -161,15 +164,16 @@ def _normalize_video_path(root: Path, raw_path: str) -> Path:
         return matches[0]
     raise FileNotFoundError(f"Unable to resolve video path '{raw_path}' under {root}")
 
+
 def _assign_splits(entries: List[Dict[str, str]], seed: int) -> None:
+    """Assign train/val/test splits to entries."""
     labels = [entry["label"] for entry in entries]
     idx = np.arange(len(entries))
     sss = StratifiedShuffleSplit(n_splits=1, test_size=0.2, random_state=seed)
-    # Handle single class case or small dataset
+    
     try:
         train_idx, temp_idx = next(sss.split(idx, labels))
     except ValueError:
-        # Fallback for very small datasets or single class
         LOGGER.warning("Stratified split failed (likely single class). Using random split.")
         np.random.seed(seed)
         perm = np.random.permutation(len(entries))
@@ -190,7 +194,6 @@ def _assign_splits(entries: List[Dict[str, str]], seed: int) -> None:
             sss_val = StratifiedShuffleSplit(n_splits=1, test_size=0.5, random_state=seed)
             val_idx, test_idx = next(sss_val.split(temp_idx_array, temp_labels))
         except ValueError:
-             # Fallback
             mid = len(temp_idx) // 2
             val_idx = np.arange(mid)
             test_idx = np.arange(mid, len(temp_idx))
@@ -198,7 +201,9 @@ def _assign_splits(entries: List[Dict[str, str]], seed: int) -> None:
         set_split(temp_idx_array[val_idx], "val")
         set_split(temp_idx_array[test_idx], "test")
 
+
 def _load_metadata(root: Path, seed: int = 1337) -> List[Dict[str, str]]:
+    """Load metadata from CSV or scan directory."""
     metadata_path = root / "metadata.csv"
     entries: List[Dict[str, str]] = []
 
@@ -208,16 +213,9 @@ def _load_metadata(root: Path, seed: int = 1337) -> List[Dict[str, str]]:
         label_col = _detect_column(df, METADATA_LABEL_CANDIDATES)
         
         if path_col is None or label_col is None:
-             # Fallback to directory scan if metadata is malformed
-             LOGGER.warning("Metadata CSV found but columns missing. Falling back to directory scan.")
-             pass
+            LOGGER.warning("Metadata CSV found but columns missing. Falling back to directory scan.")
         else:
             split_col = _detect_column(df, METADATA_SPLIT_CANDIDATES)
-            if split_col is None:
-                # We need to assign splits if not present
-                # But we can't easily modify the DF in place and return entries list with splits
-                # So we'll just load entries and assign splits later if needed
-                pass
             
             for _, row in df.iterrows():
                 try:
@@ -234,12 +232,10 @@ def _load_metadata(root: Path, seed: int = 1337) -> List[Dict[str, str]]:
                 _assign_splits(entries, seed)
             return entries
 
-    # Directory scan fallback
     videos = list_videos(root, VIDEO_EXTS)
     if not videos:
-        # Try checking if root is inside DCSASS Dataset
         if (root / "DCSASS Dataset").exists():
-             videos = list_videos(root / "DCSASS Dataset", VIDEO_EXTS)
+            videos = list_videos(root / "DCSASS Dataset", VIDEO_EXTS)
         
     if not videos:
         LOGGER.warning(f"No video files found under {root}.")
@@ -251,7 +247,6 @@ def _load_metadata(root: Path, seed: int = 1337) -> List[Dict[str, str]]:
             label = video.parent.parent.name
         entries.append({"path": str(video), "label": label})
     
-    # Filter labels if configured
     unique_labels = sorted(list(set(entry["label"] for entry in entries)))
     if hasattr(config, 'SELECTED_LABELS') and config.SELECTED_LABELS:
         LOGGER.info(f"Limiting to selected labels: {config.SELECTED_LABELS}")
@@ -265,32 +260,33 @@ def _load_metadata(root: Path, seed: int = 1337) -> List[Dict[str, str]]:
 
     _assign_splits(entries, seed)
     
-    # Add binary labels
     for entry in entries:
         entry["binary_label"] = 0 if entry["label"].lower() == "normal" else 1
         
     return entries
 
+
 def load_split_entries(root: str | Path, split: str, seed: int = 1337) -> List[Dict[str, str]]:
+    """Load entries for a specific split."""
     dataset_root = resolve_dcsass_root(root)
     entries = _load_metadata(dataset_root, seed=seed)
     filtered = [entry for entry in entries if entry.get("split") == split]
     if not filtered:
-        # If no entries for split, maybe the dataset is small or splits weren't assigned correctly
-        # Just return empty list or warn
         LOGGER.warning(f"No entries found for split '{split}'.")
     return filtered
 
-# --- Caching Utils ---
 
 def _frames_to_array(frames: Sequence[np.ndarray] | np.ndarray) -> np.ndarray:
+    """Convert frames to numpy array."""
     if isinstance(frames, np.ndarray):
         return frames
     if not frames:
         return np.empty((0, 224, 224, 3), dtype=np.uint8)
     return np.stack(frames)
 
+
 def _resolve_cache_dir(root: Path, cache_dir: Optional[str | Path]) -> Path:
+    """Resolve cache directory path."""
     if cache_dir is None:
         return (root / "cache" / "frames").resolve()
     cache_dir = Path(cache_dir)
@@ -298,10 +294,13 @@ def _resolve_cache_dir(root: Path, cache_dir: Optional[str | Path]) -> Path:
         return cache_dir.resolve()
     return (root / cache_dir).resolve()
 
+
 def _frame_cache_path(cache_root: Path, video_path: Path, image_size: Tuple[int, int]) -> Path:
+    """Generate cache path for video frames."""
     key = f"{_CACHE_VERSION}|{video_path.resolve()}|{image_size[0]}x{image_size[1]}"
     digest = hashlib.sha1(key.encode("utf-8")).hexdigest()
     return cache_root / f"{digest}.npz"
+
 
 def _load_or_cache_frames(
     video_path: Path,
@@ -310,6 +309,7 @@ def _load_or_cache_frames(
     cache_dir: Optional[Path],
     max_frames: Optional[int] = None,
 ) -> np.ndarray:
+    """Load frames from cache or decode and cache."""
     if not cache_decoded:
         return _frames_to_array(decode_video_opencv(str(video_path), target_size=image_size, max_frames=max_frames))
         
@@ -328,9 +328,6 @@ def _load_or_cache_frames(
             except OSError:
                 pass
                 
-            except OSError:
-                pass
-                
     frames = _frames_to_array(decode_video_opencv(str(video_path), target_size=image_size, max_frames=max_frames))
     if frames.size > 0:
         try:
@@ -339,7 +336,6 @@ def _load_or_cache_frames(
             LOGGER.warning("Failed to write frame cache: %s", exc)
     return frames
 
-# --- Dataset Creation ---
 
 def make_bag_dataset(
     root: str | Path,
@@ -353,7 +349,7 @@ def make_bag_dataset(
     cache_dir: Optional[str | Path] = None,
     max_frames: int = 1000,
 ) -> "tf.data.Dataset":
-
+    """Create a TensorFlow dataset of video bags for MIL training."""
     dataset_root = resolve_dcsass_root(root)
     entries_list = load_split_entries(dataset_root, split, seed=seed)
     cache_root = _resolve_cache_dir(dataset_root, cache_dir) if cache_decoded else None
@@ -380,7 +376,6 @@ def make_bag_dataset(
                 continue
                 
             segments = segments.astype(np.float32) / 255.0
-            # Yield: (Bag_Size, T, H, W, C), Label, VideoID
             yield segments, np.int32(entry["binary_label"]), str(video_path).encode("utf-8")
 
     output_signature = (
@@ -391,11 +386,6 @@ def make_bag_dataset(
 
     ds = tf.data.Dataset.from_generator(generator, output_signature=output_signature)
     
-    # Convert to RaggedTensor to handle variable bag sizes if batching > 1 (though MIL usually batch=1 bag)
-    # But here we yield (Bag_Size, ...), so batching this dataset means batching bags?
-    # Usually MIL trains on one bag at a time or batches of bags.
-    # If batch_size=1, we get (1, Bag_Size, ...).
-    
     ds = ds.map(
         lambda seg, label, vid: (tf.RaggedTensor.from_tensor(seg), label, vid),
         num_parallel_calls=tf.data.AUTOTUNE,
@@ -404,7 +394,7 @@ def make_bag_dataset(
     ds = ds.batch(batch_size).prefetch(tf.data.AUTOTUNE)
     return ds
 
+
 if __name__ == "__main__":
-    # Test run
     ds = make_bag_dataset(None, "train", batch_size=1)
     print("Dataset created.")
