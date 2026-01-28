@@ -3,6 +3,7 @@ data/
 features/
 cache/
 *.zip
+*.tar
 *.tar.gz
 data.zip
 
